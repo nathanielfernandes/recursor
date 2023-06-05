@@ -1,9 +1,14 @@
 use std::net::{Ipv4Addr, UdpSocket};
 
-use dns::{DnsPacket, QueryType};
+use dns::{
+    packet::DnsPacket,
+    question::{DnsQuestion, QueryType},
+};
 
+use crate::dns::header::ResultCode;
+
+pub mod buffer;
 pub mod dns;
-pub mod packetbuff;
 
 pub fn lookup<S: Into<String>>(
     qname: S,
@@ -15,10 +20,10 @@ pub fn lookup<S: Into<String>>(
     let mut packet = DnsPacket::new();
     packet.header.id = 1234;
     packet.header.rd = true;
-    packet.add_question(dns::DnsQuestion::new(qname.into(), qtype));
+    packet.add_question(DnsQuestion::new(qname.into(), qtype));
 
     // write our packet to a buffer
-    let mut req_buf = packetbuff::PacketBuffer::new();
+    let mut req_buf = buffer::PacketBuffer::new();
     packet.write(&mut req_buf)?;
 
     // send our query packet
@@ -27,7 +32,7 @@ pub fn lookup<S: Into<String>>(
         .map_err(|_| "failed to send")?;
 
     // receive the response
-    let mut res_buf = packetbuff::PacketBuffer::new();
+    let mut res_buf = buffer::PacketBuffer::new();
     socket
         .recv_from(&mut res_buf.buf)
         .map_err(|_| "failed to recv")?;
@@ -51,12 +56,12 @@ pub fn recursive_lookup<S: AsRef<str>>(
         let response = lookup(qname, qtype, server, socket)?;
 
         // check if we have any answers and no errors
-        if response.header.rcode == dns::ResultCode::NOERROR && !response.answers.is_empty() {
+        if response.header.rcode == ResultCode::NOERROR && !response.answers.is_empty() {
             return Ok(response);
         }
 
         // check for NXDOMAIN (Name Error)
-        if response.header.rcode == dns::ResultCode::NXDOMAIN {
+        if response.header.rcode == ResultCode::NXDOMAIN {
             return Ok(response);
         }
 
@@ -90,7 +95,7 @@ pub fn handle_query(
     query_socket: &UdpSocket,
 ) -> Result<(), &'static str> {
     // receive a query packet
-    let mut req_buffer = packetbuff::PacketBuffer::new();
+    let mut req_buffer = buffer::PacketBuffer::new();
     let (_, src) = listen_socket
         .recv_from(&mut req_buffer.buf)
         .map_err(|_| "failed to recv")?;
@@ -130,14 +135,14 @@ pub fn handle_query(
                 res_packet.add_additional(additional);
             }
         } else {
-            res_packet.header.rcode = dns::ResultCode::SERVFAIL;
+            res_packet.header.rcode = ResultCode::SERVFAIL;
         }
     } else {
-        res_packet.header.rcode = dns::ResultCode::FORMERR;
+        res_packet.header.rcode = ResultCode::FORMERR;
     }
 
     // write our response packet to a buffer
-    let mut res_buffer = packetbuff::PacketBuffer::new();
+    let mut res_buffer = buffer::PacketBuffer::new();
     res_packet.write(&mut res_buffer)?;
 
     // send our response packet
